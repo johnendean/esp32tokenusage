@@ -131,3 +131,21 @@ def pace_message(session, week, now, utc_offset):
     if state == CLOSE:
         return ("Cutting it close for " + label + " reset", CLOSE)
     return ("On track for " + label + " reset", ON_TRACK)
+
+
+def wrap_lines(text, width, lines):
+    """Word-wrap text into exactly `lines` strings of at most `width` chars.
+
+    Words longer than a line are cut; text that does not fit is dropped.
+    """
+    out = [""]
+    for word in text.split():
+        word = word[:width]
+        if not out[-1]:
+            out[-1] = word
+        elif len(out[-1]) + 1 + len(word) <= width:
+            out[-1] += " " + word
+        else:
+            out.append(word)
+    out = out[:lines]
+    return out + [""] * (lines - len(out))

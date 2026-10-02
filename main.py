@@ -2,6 +2,7 @@ import json
 import time
 
 import asyncio
+import framebuf
 import network
 
 import board
@@ -45,7 +46,36 @@ def unix_now():
 def text(s, x, y, width_chars, color, align_right=False, face=font):
     s = s[:width_chars]
     s = ("%" + ("" if align_right else "-") + str(width_chars) + "s") % s
-    tft.text(face, s, x, y, color, BLACK)
+    if face.WIDTH in (8, 16):
+        tft.text(face, s, x, y, color, BLACK)
+    else:
+        mono_text(face, s, x, y, color)
+
+
+_glyphs = {}
+
+
+def mono_text(face, s, x, y, color):
+    """Draw a MONO_HLSB font (e.g. spleen_12x24), which st7789py cannot."""
+    w, h = face.WIDTH, face.HEIGHT
+    glyphs = _glyphs.get(face)
+    if glyphs is None:
+        glyphs = _glyphs[face] = memoryview(bytearray(face.FONT))  # framebuf needs it writable
+    size = h * ((w + 7) // 8)
+    out = bytearray(w * len(s) * h * 2)
+    line = framebuf.FrameBuffer(out, w * len(s), h, framebuf.RGB565)
+    # framebuf stores pixels little-endian; the displays want big-endian.
+    palette = framebuf.FrameBuffer(bytearray(4), 2, 1, framebuf.RGB565)
+    palette.pixel(0, 0, ((BLACK & 0xFF) << 8) | (BLACK >> 8))
+    palette.pixel(1, 0, ((color & 0xFF) << 8) | (color >> 8))
+    for i, ch in enumerate(s):
+        code = ord(ch)
+        if not face.FIRST <= code < face.LAST:
+            code = ord("?")
+        start = (code - face.FIRST) * size
+        glyph = framebuf.FrameBuffer(glyphs[start : start + size], w, h, framebuf.MONO_HLSB)
+        line.blit(glyph, i * w, 0, -1, palette)
+    tft.blit_buffer(out, x, y, w * len(s), h)
 
 
 def draw_row(y, label, window, now):
@@ -78,7 +108,9 @@ def draw():
         now = unix_now()
         message = usage.pace_message(state.session, state.week, now, state.utc_offset)
         message = (message[0], MESSAGE_COLORS[message[1]]) if message else ("", WHITE)
-    text(message[0], layout.message_x, layout.message_y, layout.message_chars, message[1])
+    face = layout.message_font
+    for i, line in enumerate(usage.wrap_lines(message[0], layout.message_chars, layout.message_lines)):
+        text(line, layout.message_x, layout.message_y + i * (face.HEIGHT + 2), layout.message_chars, message[1], face=face)
     draw_row(layout.row_ys[0], "Current session", state.session, now)
     draw_row(layout.row_ys[1], "This week", state.week, now)
 

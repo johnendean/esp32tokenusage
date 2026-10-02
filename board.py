@@ -46,6 +46,8 @@ def _c6_lcd():
     return tft, Layout(
         message_x=4,
         message_y=4,
+        message_font=small,
+        message_lines=1,
         message_chars=(tft.width - 8) // small.WIDTH,
         divider_y=24,
         logo_x=4,
@@ -64,6 +66,7 @@ def _c6_lcd():
 
 def _s3_amoled():
     import co5300
+    import spleen_12x24 as medium
     import vga2_16x32 as big
 
     i2c = I2C(0, sda=Pin(15), scl=Pin(14), freq=400_000)
@@ -75,14 +78,16 @@ def _s3_amoled():
     bar_w = tft.width - 2 * margin
     return tft, Layout(
         message_x=margin,
-        message_y=88,
-        message_chars=bar_w // small.WIDTH,
-        divider_y=124,
+        message_y=84,
+        message_font=medium,
+        message_lines=2,
+        message_chars=bar_w // medium.WIDTH,
+        divider_y=144,
         logo_x=(tft.width - 48) // 2,
         logo_y=24,
         column_x=margin,
         bar_w=bar_w,
-        row_ys=(156, 306),
+        row_ys=(176, 326),
         label_font=big,
         pct_dy=76,  # "N% used" shares the reset line, right-aligned
         bar_dy=42,
