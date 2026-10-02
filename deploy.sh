@@ -5,4 +5,4 @@ cd "$(dirname "$0")"
 port="${1:-/dev/cu.usbmodem1101}"
 [ -f wifi_secrets.py ] || { echo "Create wifi_secrets.py from wifi_secrets_example.py first" >&2; exit 1; }
 .venv/bin/mpremote connect "$port" \
-  cp st7789py.py vga1_8x16.py claude_logo.py usage.py wifi_secrets.py main.py : + reset
+  cp board.py co5300.py st7789py.py vga1_8x16.py vga2_16x32.py claude_logo.py usage.py wifi_secrets.py main.py : + reset

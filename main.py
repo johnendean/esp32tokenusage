@@ -3,8 +3,8 @@ import time
 
 import asyncio
 import network
-from machine import Pin, SPI
 
+import board
 import claude_logo
 import st7789py as st7789
 import usage
@@ -15,24 +15,7 @@ HOSTNAME = wifi_secrets.DEVICE_HOST.split(".")[0]
 REDRAW_SECONDS = 30
 MAX_BODY = 2048
 
-# Waveshare ESP32-C6-LCD-1.47 pinout (ST7789, 172x320, panel offset 34 px)
-spi = SPI(1, baudrate=40_000_000, polarity=0, phase=0, sck=Pin(7), mosi=Pin(6), miso=Pin(5))
-tft = st7789.ST7789(
-    spi,
-    172,
-    320,
-    reset=Pin(21, Pin.OUT),
-    cs=Pin(14, Pin.OUT),
-    dc=Pin(15, Pin.OUT),
-    backlight=Pin(22, Pin.OUT),
-    rotation=1,  # landscape, verified the right way up with the board as mounted
-    custom_rotations=(
-        (0x00, 172, 320, 34, 0, False),
-        (0x60, 320, 172, 0, 34, False),
-        (0xC0, 172, 320, 34, 0, False),
-        (0xA0, 320, 172, 0, 34, False),
-    ),
-)
+tft, layout = board.setup()
 
 BLACK = st7789.BLACK
 WHITE = st7789.WHITE
@@ -41,18 +24,6 @@ RED = st7789.color565(0xE0, 0x45, 0x3A)
 GREY = st7789.color565(0x99, 0x99, 0x99)
 TRACK = st7789.color565(0x33, 0x33, 0x33)
 MESSAGE_COLORS = {usage.ON_TRACK: WHITE, usage.CLOSE: ORANGE, usage.LIMIT: RED}
-
-# Layout (320x172): Pace message across the top, logo left, two Usage bar rows right.
-MARGIN = 4
-MESSAGE_Y = 4
-DIVIDER_Y = 24
-COLUMN_X = 60
-BAR_W = tft.width - COLUMN_X - 8
-BAR_H = 8
-ROW_YS = (42, 106)
-LOGO_Y = 74
-MESSAGE_CHARS = (tft.width - 2 * MARGIN) // font.WIDTH
-RESET_CHARS = (tft.width - COLUMN_X) // font.WIDTH
 
 
 class State:
@@ -71,27 +42,29 @@ def unix_now():
     return time.time() + state.clock_offset
 
 
-def text(s, x, y, width_chars, color, align_right=False):
+def text(s, x, y, width_chars, color, align_right=False, face=font):
     s = s[:width_chars]
     s = ("%" + ("" if align_right else "-") + str(width_chars) + "s") % s
-    tft.text(font, s, x, y, color, BLACK)
+    tft.text(face, s, x, y, color, BLACK)
 
 
 def draw_row(y, label, window, now):
-    text(label, COLUMN_X, y, 15, WHITE)
+    L = layout
+    text(label, L.column_x, y, 15, WHITE, face=L.label_font)
     if window is None:
         pct, reset = None, ""
     else:
         pct, reset = usage.current_pct(window, now), usage.reset_text(window, now, state.utc_offset)
-    text("--% used" if pct is None else "%d%% used" % round(pct), tft.width - 8 - 9 * font.WIDTH, y, 9, WHITE, True)
+    pct_x = L.column_x + L.bar_w - 9 * font.WIDTH
+    text("--% used" if pct is None else "%d%% used" % round(pct), pct_x, y + L.pct_dy, 9, WHITE, True)
 
-    filled = 0 if pct is None else min(BAR_W, round(BAR_W * pct / 100))
-    bar_y = y + 20
+    filled = 0 if pct is None else min(L.bar_w, round(L.bar_w * pct / 100))
+    bar_y = y + L.bar_dy
     if filled:
-        tft.fill_rect(COLUMN_X, bar_y, filled, BAR_H, RED if pct >= 90 else ORANGE)
-    if filled < BAR_W:
-        tft.fill_rect(COLUMN_X + filled, bar_y, BAR_W - filled, BAR_H, TRACK)
-    text(reset, COLUMN_X, y + 32, RESET_CHARS, GREY)
+        tft.fill_rect(L.column_x, bar_y, filled, L.bar_h, RED if pct >= 90 else ORANGE)
+    if filled < L.bar_w:
+        tft.fill_rect(L.column_x + filled, bar_y, L.bar_w - filled, L.bar_h, TRACK)
+    text(reset, L.column_x, y + L.reset_dy, L.reset_chars, GREY)
 
 
 def draw():
@@ -105,15 +78,16 @@ def draw():
         now = unix_now()
         message = usage.pace_message(state.session, state.week, now, state.utc_offset)
         message = (message[0], MESSAGE_COLORS[message[1]]) if message else ("", WHITE)
-    text(message[0], MARGIN, MESSAGE_Y, MESSAGE_CHARS, message[1])
-    draw_row(ROW_YS[0], "Current session", state.session, now)
-    draw_row(ROW_YS[1], "This week", state.week, now)
+    text(message[0], layout.message_x, layout.message_y, layout.message_chars, message[1])
+    draw_row(layout.row_ys[0], "Current session", state.session, now)
+    draw_row(layout.row_ys[1], "This week", state.week, now)
 
 
 def draw_static():
     tft.fill(BLACK)
-    tft.hline(MARGIN, DIVIDER_Y, tft.width - 2 * MARGIN, TRACK)
-    tft.blit_buffer(claude_logo.BUFFER, MARGIN, LOGO_Y, claude_logo.WIDTH, claude_logo.HEIGHT)
+    x = layout.message_x
+    tft.hline(x, layout.divider_y, tft.width - 2 * x, TRACK)
+    tft.blit_buffer(claude_logo.BUFFER, layout.logo_x, layout.logo_y, claude_logo.WIDTH, claude_logo.HEIGHT)
 
 
 def window_from(payload, key):
