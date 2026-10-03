@@ -3,5 +3,7 @@ WIFI_SSID = "your-network"
 WIFI_PASSWORD = "your-password"
 # Shared secret the Mac sends with each update; the board rejects updates without it.
 DEVICE_TOKEN = "change-me"
-# Hostname the board announces on the network; the Mac sends updates here.
-DEVICE_HOST = "claude-usage.local"
+# Boards announce themselves as <DEVICE_NAME>-<board>.local, e.g. claude-usage-c6.local.
+DEVICE_NAME = "claude-usage"
+# Boards the Mac sends updates to, separated by commas.
+DEVICE_HOSTS = "claude-usage-c6.local, claude-usage-s3.local"

@@ -88,5 +88,33 @@ class PaceTest(unittest.TestCase):
             self.assertLessEqual(len(text), 39, text)
 
 
+class WrapLinesTest(unittest.TestCase):
+    def test_short_text_fills_first_line(self):
+        self.assertEqual(usage.wrap_lines("On track", 28, 2), ["On track", ""])
+
+    def test_breaks_between_words(self):
+        self.assertEqual(
+            usage.wrap_lines("Cutting it close for this week reset", 28, 2),
+            ["Cutting it close for this", "week reset"],
+        )
+
+    def test_single_line_truncates_overflow(self):
+        self.assertEqual(usage.wrap_lines("one two three", 7, 1), ["one two"])
+
+    def test_cuts_words_longer_than_a_line(self):
+        self.assertEqual(usage.wrap_lines("abcdefghij", 4, 2), ["abcd", ""])
+
+    def test_empty_text_gives_blank_lines(self):
+        self.assertEqual(usage.wrap_lines("", 10, 2), ["", ""])
+
+    def test_every_message_fits_two_amoled_lines(self):
+        for text in (
+            "Cutting it close for tomorrow reset",
+            "Session limit ~tomorrow 12:30 AM",
+            "Waiting for data  192.168.100.200",
+        ):
+            self.assertEqual(" ".join(" ".join(usage.wrap_lines(text, 28, 2)).split()), " ".join(text.split()))
+
+
 if __name__ == "__main__":
     unittest.main()

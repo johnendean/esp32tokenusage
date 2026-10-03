@@ -2,3 +2,5 @@
 __pycache__/
 *.pyc
 wifi_secrets.py
+ESP32_GENERIC_S3-SPIRAM_OCT-v1.29.0.bin
+esp32s3_amoled_backup_full16MB.bin

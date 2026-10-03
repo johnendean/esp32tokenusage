@@ -2,13 +2,14 @@
 
 Reads the status line JSON on stdin, then detaches so Claude Code never waits on
 the network and cannot cancel a send mid-flight. Silently does nothing when the
-JSON has no rate limits or the board is unreachable.
+JSON has no rate limits or no board is reachable.
 """
 import json
 import os
 import re
 import sys
 import tempfile
+import threading
 import time
 import urllib.request
 from datetime import datetime
@@ -56,17 +57,46 @@ def should_send(payload):
     return True
 
 
-def send(payload):
-    cfg = settings()
+def device_hosts(cfg):
+    """Boards to update, from the comma-separated DEVICE_HOSTS setting."""
+    return [h.strip() for h in cfg["DEVICE_HOSTS"].split(",") if h.strip()]
+
+
+def post(host, body, token):
     req = urllib.request.Request(
-        "http://%s/usage" % cfg["DEVICE_HOST"],
-        data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json", "X-Token": cfg["DEVICE_TOKEN"]},
+        "http://%s/usage" % host,
+        data=body,
+        headers={"Content-Type": "application/json", "X-Token": token},
         method="POST",
     )
     urllib.request.urlopen(req, timeout=5).close()
-    with open(CACHE, "w") as f:
-        json.dump({"key": [payload["session"], payload["week"], payload["utc_offset"]], "sent": payload["now"]}, f)
+
+
+def send(payload):
+    """Send to every board at once, so an offline one does not hold up the rest."""
+    cfg = settings()
+    hosts = device_hosts(cfg)
+    if not hosts:
+        raise ValueError("DEVICE_HOSTS in wifi_secrets.py lists no boards")
+    body = json.dumps(payload).encode()
+    errors = []
+
+    def attempt(host):
+        try:
+            post(host, body, cfg["DEVICE_TOKEN"])
+        except Exception as e:
+            errors.append("%s: %s" % (host, e))
+
+    threads = [threading.Thread(target=attempt, args=(h,)) for h in hosts]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    if len(errors) < len(hosts):
+        with open(CACHE, "w") as f:
+            json.dump({"key": [payload["session"], payload["week"], payload["utc_offset"]], "sent": payload["now"]}, f)
+    if errors:
+        raise RuntimeError("; ".join(errors))
 
 
 def main():
