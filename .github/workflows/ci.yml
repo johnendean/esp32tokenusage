@@ -1,0 +1,41 @@
+name: CI
+
+# Every pull request into main must pass this before it is merged, and main itself is
+# re-checked after the merge in case two green PRs conflict semantically.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# A second push to the same branch makes the first run irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      # The board code imports MicroPython-only modules, so it cannot run here, but a
+      # syntax error in it should still fail before anyone deploys it.
+      - name: Build
+        run: python -m compileall -q -x '/\.venv/' .
+
+      # The tests use only the standard library, so there is nothing to install.
+      - name: Test
+        run: python -m unittest discover -v tests

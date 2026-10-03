@@ -76,6 +76,8 @@ def send(payload):
     """Send to every board at once, so an offline one does not hold up the rest."""
     cfg = settings()
     hosts = device_hosts(cfg)
+    if not hosts:
+        raise ValueError("DEVICE_HOSTS in wifi_secrets.py lists no boards")
     body = json.dumps(payload).encode()
     errors = []
 

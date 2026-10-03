@@ -55,5 +55,14 @@ class SendTest(unittest.TestCase):
         self.assertFalse(os.path.exists(self.cache))
 
 
+    def test_empty_host_list_is_an_error_not_a_silent_skip(self):
+        with mock.patch.object(push_usage, "settings", return_value={"DEVICE_HOSTS": " , ", "DEVICE_TOKEN": "t"}):
+            with mock.patch.object(push_usage, "post") as post:
+                with self.assertRaisesRegex(ValueError, "DEVICE_HOSTS"):
+                    push_usage.send(PAYLOAD)
+        post.assert_not_called()
+        self.assertFalse(os.path.exists(self.cache))
+
+
 if __name__ == "__main__":
     unittest.main()
