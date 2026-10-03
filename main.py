@@ -12,7 +12,8 @@ import usage
 import vga1_8x16 as font
 import wifi_secrets
 
-HOSTNAME = wifi_secrets.DEVICE_HOST.split(".")[0]
+# Each board announces its own name, e.g. claude-usage-s3.local, so several can share a network.
+HOSTNAME = "%s-%s" % (wifi_secrets.DEVICE_NAME, board.detect())
 REDRAW_SECONDS = 30
 MAX_BODY = 2048
 

@@ -97,11 +97,16 @@ def _s3_amoled():
     )
 
 
-def setup():
-    """Return (display, Layout) for the board this is running on."""
+def detect():
+    """Short name for the board this is running on: "c6" or "s3"."""
     chip = os.uname().machine.upper().replace("-", "")
     if "ESP32S3" in chip:
-        return _s3_amoled()
+        return "s3"
     if "ESP32C6" in chip:
-        return _c6_lcd()
+        return "c6"
     raise RuntimeError("Unsupported board: " + os.uname().machine)
+
+
+def setup():
+    """Return (display, Layout) for the board this is running on."""
+    return _s3_amoled() if detect() == "s3" else _c6_lcd()
