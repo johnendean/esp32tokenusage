@@ -1,6 +1,9 @@
 # Architecture
 
-The display shows **Current session** and **This week** usage (see [CONTEXT.md](../CONTEXT.md)). There is no daemon on the Mac, and the board never fetches anything. Claude Code decides when to send an update: each time it runs the status line, the Mac pushes the latest numbers to the board over Wi-Fi. Between updates, the board uses its own clock to keep the screen current. [ADR 0001](adr/0001-usage-from-status-line-pushed-over-wifi.md) explains why.
+The display shows each **Agent**'s usage (see [CONTEXT.md](../CONTEXT.md)): Claude's **Current session** and **This week**, and Copilot's **This month**. The board never fetches anything; the Mac pushes numbers to it over Wi-Fi. Between updates, the board uses its own clock to keep the screen current.
+
+- **Claude:** Claude Code decides when to send. Each time it runs the status line, the Mac pushes the latest numbers. [ADR 0001](adr/0001-usage-from-status-line-pushed-over-wifi.md) explains why.
+- **Copilot:** a launchd job on the Mac fetches This month from GitHub every 5 minutes and pushes it. [ADR 0002](adr/0002-copilot-usage-polled-by-a-mac-background-job.md) explains why this one needs a background job.
 
 ## Components
 
@@ -15,17 +18,21 @@ flowchart LR
         push["mac/push_usage.py<br/>(detached process)"]
         cache[("$TMPDIR/claude-usage-display.json<br/>last sent values")]
         secrets_mac[/"wifi_secrets.py<br/>DEVICE_HOSTS, DEVICE_TOKEN"/]
+        job["launchd job, every 5 min<br/>mac/push_copilot.py"]
+        gh["gh CLI login"]
     end
+
+    github["GitHub<br/>/copilot_internal/user"]
 
     subgraph board["Each board (claude-usage-c6.local, claude-usage-s3.local)"]
         server["HTTP server<br/>POST /usage"]
-        state[("State<br/>session, week,<br/>clock offset, UTC offset")]
+        state[("State<br/>session, week, month, AI credits,<br/>when each Agent last updated,<br/>clock offset, UTC offset")]
         loop["Redraw loop<br/>every 30 s or on update"]
-        logic["usage.py<br/>reset text, Pace message"]
+        logic["usage.py<br/>reset text, Pace message,<br/>Summary rows"]
         lcd["Screen, picked by board.py<br/>C6: ST7789 LCD 320×172 landscape<br/>S3: CO5300 AMOLED 368×448 portrait"]
         wifi["Wi-Fi keeper"]
         power["S3 only: power chip (axp2101.py)<br/>read every 2 s"]
-        touchc["S3 only: touch (cst816.py)<br/>polled every 50 ms"]
+        touchc["S3: touch (cst816.py)<br/>C6: BOOT button<br/>polled every 50 ms"]
         batt["battery.py<br/>Charging state, estimate, warnings"]
     end
 
@@ -37,6 +44,10 @@ flowchart LR
     push <--> cache
     secrets_mac -.-> push
     push == "HTTP POST to every board<br/>in parallel, X-Token header" ==> server
+    gh -.-> job
+    job -- "gh api" --> github
+    secrets_mac -.-> job
+    job == "same POST /usage,<br/>copilot only" ==> server
     server --> state
     state --> loop
     loop --> logic
@@ -44,14 +55,25 @@ flowchart LR
     wifi -. "keeps the board<br/>on the network" .-> server
     power --> batt
     batt --> loop
-    touchc -- "tap switches<br/>Usage / Battery screen" --> loop
+    touchc -- "tap or press<br/>switches screen" --> loop
 ```
 
 `usage.py` runs on both machines: on the board to draw the screen, and on the Mac for the unit tests.
 
 The same code runs on the Waveshare ESP32-C6-LCD-1.47 and the ESP32-S3-Touch-AMOLED-1.8. At startup `board.py` reads the chip family, sets up that board's display and returns a layout for its screen; the board then announces itself as `<DEVICE_NAME>-c6.local` or `<DEVICE_NAME>-s3.local`. The Mac sends each update to every host in `DEVICE_HOSTS`, so a board that is switched off does not hold up the others.
 
-On the S3, which has a battery and a touch screen, the board also shows a **Battery indicator** in the top-right corner and a **Battery screen** that a tap opens and closes. The Battery screen goes back to the Usage screen after 30 seconds without a touch. `battery.py` turns the power chip's readings into plain words, so like `usage.py` it is unit-tested on the Mac.
+An update carries Claude's windows, Copilot's This month, or both; the board keeps whatever the update leaves out. To install the Copilot job, run `mac/install_copilot_job.sh`.
+
+## Screens
+
+| Screen | Shows | S3 (touch) | C6 (BOOT button) |
+|---|---|---|---|
+| **Summary screen** (starts here) | One row per Agent: logo, most pressing Usage bar, short verdict | Tap a row to open that Agent screen; tap the top strip for the Battery screen | Press for the Claude screen |
+| **Claude screen** | Pace message, Current session and This week, "Updated N ago" | Tap anywhere for Summary | Press for the Copilot screen |
+| **Copilot screen** | Pace message, This month, AI credits used, "Updated N ago" (orange after an hour) | Tap anywhere for Summary | Press for Summary |
+| **Battery screen** | Charge level, Charging state, readings in plain words | Tap anywhere for Summary | Not on this board |
+
+Any screen other than the Summary screen goes back to it after 30 seconds without a touch or press. On the S3 the **Battery indicator** sits in the top-right corner of every screen except the Battery screen. `battery.py` turns the power chip's readings into plain words, so like `usage.py` it is unit-tested on the Mac.
 
 ## What happens on an update
 

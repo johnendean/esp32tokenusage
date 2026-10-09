@@ -1,12 +1,12 @@
 """
 CST816-family touch controller on the Waveshare ESP32-S3-Touch-AMOLED-1.8.
 
-Only "is a finger down?" is needed, so it is polled rather than wired to the
-interrupt pin.
+Only "where is the finger, if any?" is needed, so it is polled rather than
+wired to the interrupt pin.
 """
 
 _ADDRESS = 0x15
-_FINGERS = 0x02
+_FINGERS = 0x02  # followed by X high, X low, Y high, Y low
 _DISABLE_AUTO_SLEEP = 0xFE
 
 
@@ -20,8 +20,12 @@ class CST816:
         except OSError:
             pass
 
-    def touched(self):
+    def point(self):
+        """(x, y) of the finger on the screen, or None when nothing is touching it."""
         try:
-            return self.i2c.readfrom_mem(self.address, _FINGERS, 1)[0] & 0x0F > 0
+            b = self.i2c.readfrom_mem(self.address, _FINGERS, 5)
         except OSError:
-            return False
+            return None
+        if not b[0] & 0x0F:
+            return None
+        return ((b[1] & 0x0F) << 8 | b[2], (b[3] & 0x0F) << 8 | b[4])

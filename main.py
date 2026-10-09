@@ -8,6 +8,7 @@ import network
 import battery
 import board
 import claude_logo
+import copilot_logo
 import st7789py as st7789
 import usage
 import vga1_8x16 as font
@@ -18,11 +19,15 @@ HOSTNAME = "%s-%s" % (wifi_secrets.DEVICE_NAME, board.detect())
 REDRAW_SECONDS = 30
 MAX_BODY = 2048
 BATTERY_SECONDS = 2  # how often the power chip is read and the Battery screen redrawn
-TOUCH_MS = 50
-BATTERY_SCREEN_IDLE = 30  # seconds without a touch before the Usage screen comes back
-USAGE_SCREEN, BATTERY_SCREEN = "usage", "battery"
+INPUT_MS = 50  # how often the touch screen or button is checked
+IDLE_SECONDS = 30  # without a touch or press, any other screen returns to the Summary screen
+COPILOT_STALE = 3600  # the Mac job sends every 5 minutes, so an hour old means it has stopped
 
-tft, layout, power, touch = board.setup()
+SUMMARY_SCREEN, CLAUDE_SCREEN, COPILOT_SCREEN, BATTERY_SCREEN = "summary", "claude", "copilot", "battery"
+BUTTON_CYCLE = (SUMMARY_SCREEN, CLAUDE_SCREEN, COPILOT_SCREEN)
+
+hw = board.setup()
+tft, layout, power = hw.tft, hw.layout, hw.power
 
 BLACK = st7789.BLACK
 WHITE = st7789.WHITE
@@ -54,15 +59,20 @@ BOLT = (
 class State:
     session = None  # (pct, resets_at)
     week = None
+    claude_updated = None  # board time.time() of the last Claude update
+    month = None  # Copilot's This month: (pct, resets_at)
+    month_length = None  # seconds from the month's start to its Reset time
+    credits = None  # (AI credits used, monthly allowance)
+    copilot_updated = None
     utc_offset = 0
     clock_offset = None  # add to time.time() to get Unix epoch seconds from the Mac
     changed = asyncio.Event()
     reading = None  # latest battery.Reading, on boards with a battery
     estimator = battery.Estimator()
     brightness = None
-    screen = USAGE_SCREEN
+    screen = SUMMARY_SCREEN
     screen_changed = False  # the whole screen needs drawing again
-    last_touch = 0
+    last_input = 0
     drawn_level = None  # Charge level text last drawn large on the Battery screen
 
 
@@ -218,45 +228,145 @@ def draw_battery_screen():
         text(line, m, WARNINGS_Y + i * (face.HEIGHT + 4), cols, ORANGE, face=face)
 
 
-def draw_row(y, label, window, now):
+def draw_bar(x, y, w, h, pct):
+    filled = 0 if pct is None else min(w, round(w * pct / 100))
+    if filled:
+        tft.fill_rect(x, y, filled, h, RED if pct >= 90 else ORANGE)
+    if filled < w:
+        tft.fill_rect(x + filled, y, w - filled, h, TRACK)
+
+
+def pct_text(pct):
+    return "--% used" if pct is None else "%d%% used" % round(pct)
+
+
+def draw_row(y, label, window, now, reset_text=usage.reset_text):
     L = layout
     text(label, L.column_x, y, 15, WHITE, face=L.label_font)
     if window is None:
         pct, reset = None, ""
     else:
-        pct, reset = usage.current_pct(window, now), usage.reset_text(window, now, state.utc_offset)
+        pct, reset = usage.current_pct(window, now), reset_text(window, now, state.utc_offset)
     pct_x = L.column_x + L.bar_w - 9 * font.WIDTH
-    text("--% used" if pct is None else "%d%% used" % round(pct), pct_x, y + L.pct_dy, 9, WHITE, True)
-
-    filled = 0 if pct is None else min(L.bar_w, round(L.bar_w * pct / 100))
-    bar_y = y + L.bar_dy
-    if filled:
-        tft.fill_rect(L.column_x, bar_y, filled, L.bar_h, RED if pct >= 90 else ORANGE)
-    if filled < L.bar_w:
-        tft.fill_rect(L.column_x + filled, bar_y, L.bar_w - filled, L.bar_h, TRACK)
+    text(pct_text(pct), pct_x, y + L.pct_dy, 9, WHITE, True)
+    draw_bar(L.column_x, y + L.bar_dy, L.bar_w, L.bar_h, pct)
     text(reset, L.column_x, y + L.reset_dy, L.reset_chars, GREY)
 
 
-def draw():
-    if state.clock_offset is None:
-        if wlan.isconnected():
-            message = ("Waiting for data  " + wlan.ifconfig()[0], GREY)
-        else:
-            message = ("Connecting to Wi-Fi...", GREY)
-        now = 0
-    else:
-        now = unix_now()
-        message = usage.pace_message(state.session, state.week, now, state.utc_offset)
-        message = (message[0], MESSAGE_COLORS[message[1]]) if message else ("", WHITE)
-    if state.reading and battery.low_battery_warning(state.reading):
-        message = (battery.LOW_BATTERY_WARNING, RED)
+def low_battery():
+    return state.reading and battery.low_battery_warning(state.reading)
+
+
+def agent_message(has_data, pace):
+    """The Pace message line for an Agent screen, as (text, color)."""
+    if low_battery():
+        return (battery.LOW_BATTERY_WARNING, RED)
+    if not wlan.isconnected():
+        return ("Connecting to Wi-Fi...", GREY)
+    if not has_data:
+        return ("Waiting for data  " + wlan.ifconfig()[0], GREY)
+    return (pace[0], MESSAGE_COLORS[pace[1]]) if pace else ("", WHITE)
+
+
+def draw_message(message):
     face = layout.message_font
     for i, line in enumerate(usage.wrap_lines(message[0], layout.message_chars, layout.message_lines)):
         text(line, layout.message_x, layout.message_y + i * (face.HEIGHT + 2), layout.message_chars, message[1], face=face)
+
+
+def draw_updated(updated, stale_after=None):
+    """"Updated 12 min ago" at the foot of an Agent screen, orange once stale."""
+    if updated is None:
+        line, color = "", GREY
+    else:
+        age = time.time() - updated
+        line = usage.ago_text(age)
+        color = ORANGE if stale_after and age > stale_after else GREY
+    text(line, layout.column_x, layout.updated_y, layout.reset_chars, color)
+
+
+def now_or_zero():
+    return 0 if state.clock_offset is None else unix_now()
+
+
+def claude_windows():
+    return [(w[0], window, w[2], w[3]) for w, window in ((usage.SESSION, state.session), (usage.WEEK, state.week))]
+
+
+def copilot_windows():
+    return [("This month", state.month, state.month_length, usage.MONTH_MIN_ELAPSED)]
+
+
+def credits_text(now):
+    if state.credits is None:
+        return ""
+    used, allowance = state.credits
+    if now >= state.month[1]:
+        used = 0  # the month has reset since the last update
+    return "%d of %d AI credits" % (used, allowance)
+
+
+def draw_claude():
+    now = now_or_zero()
+    has_data = state.session is not None or state.week is not None
+    draw_message(agent_message(has_data, usage.pace_message(state.session, state.week, now, state.utc_offset)))
     draw_row(layout.row_ys[0], "Current session", state.session, now)
     draw_row(layout.row_ys[1], "This week", state.week, now)
+    draw_updated(state.claude_updated)
+
+
+def draw_copilot():
+    now = now_or_zero()
+    month = state.month
+    pace = month and usage.month_pace_message(month, state.month_length, now, state.utc_offset)
+    draw_message(agent_message(month is not None, pace))
+    draw_row(layout.row_ys[0], "This month", month, now, usage.month_reset_text)
+    cols = layout.bar_w // layout.credits_font.WIDTH
+    text(credits_text(now), layout.column_x, layout.credits_y, cols, WHITE, face=layout.credits_font)
+    draw_updated(state.copilot_updated, COPILOT_STALE)
+
+
+def summary_rows():
+    """(name, logo, windows) for each Agent, in the order the Summary screen shows them."""
+    return (("Claude", claude_logo, claude_windows()), ("Copilot", copilot_logo, copilot_windows()))
+
+
+def draw_summary():
+    S = layout.summary
+    now = now_or_zero()
+    if S.warning_y is not None:
+        cols = layout.bar_w // layout.message_font.WIDTH
+        line = battery.LOW_BATTERY_WARNING if low_battery() else ""
+        text(line, layout.column_x, S.warning_y, cols, RED, face=layout.message_font)
+    for y, (name, _, windows) in zip(S.ys, summary_rows()):
+        row = None if state.clock_offset is None else usage.summary(windows, now, state.utc_offset)
+        right = S.bar_x + S.bar_w
+        name_cols = (right - S.name_x) // S.name_font.WIDTH - 10
+        text(name, S.name_x, y, name_cols, WHITE, face=S.name_font)
+        pct_cols = 9
+        text(pct_text(row and row[1]), right - pct_cols * S.pct_font.WIDTH, y + S.pct_dy, pct_cols, WHITE, True, face=S.pct_font)
+        text(row[0] if row else "", S.label_x, y + S.label_dy, (right - S.label_x) // S.label_font.WIDTH, GREY, face=S.label_font)
+        draw_bar(S.bar_x, y + S.bar_dy, S.bar_w, S.bar_h, row and row[1])
+        if row is None:
+            verdict = ("Connecting to Wi-Fi..." if not wlan.isconnected() else "Waiting for data", GREY)
+        else:
+            verdict = (row[2], WHITE if row[3] is None else MESSAGE_COLORS[row[3]])
+        cols = (right - S.verdict_x) // S.verdict_font.WIDTH
+        text(verdict[0], S.verdict_x, y + S.verdict_dy, cols, verdict[1], face=S.verdict_font)
+
+
+def draw():
+    if state.screen == BATTERY_SCREEN:
+        if state.reading:
+            draw_battery_screen()
+        return
+    {SUMMARY_SCREEN: draw_summary, CLAUDE_SCREEN: draw_claude, COPILOT_SCREEN: draw_copilot}[state.screen]()
     if state.reading:
         draw_battery_indicator()
+
+
+def draw_logo(logo, x, y):
+    tft.blit_buffer(logo.BUFFER, x, y, logo.WIDTH, logo.HEIGHT)
 
 
 def draw_static():
@@ -265,8 +375,16 @@ def draw_static():
         return
     tft.fill(BLACK)
     x = layout.message_x
+    if state.screen == SUMMARY_SCREEN:
+        S = layout.summary
+        if S.title_y is not None:
+            text("Usage", layout.column_x, S.title_y, 5, WHITE, face=layout.label_font)
+        tft.hline(x, S.divider_y, tft.width - 2 * x, TRACK)
+        for y, (_, logo, _) in zip(S.ys, summary_rows()):
+            draw_logo(logo, S.logo_x, y)
+        return
     tft.hline(x, layout.divider_y, tft.width - 2 * x, TRACK)
-    tft.blit_buffer(claude_logo.BUFFER, layout.logo_x, layout.logo_y, claude_logo.WIDTH, claude_logo.HEIGHT)
+    draw_logo(claude_logo if state.screen == CLAUDE_SCREEN else copilot_logo, layout.logo_x, layout.logo_y)
 
 
 def window_from(payload, key):
@@ -277,11 +395,20 @@ def window_from(payload, key):
 
 
 def apply_update(payload):
+    """Store an update from the Mac: Claude's windows, Copilot's This month, or both."""
     state.clock_offset = int(payload["now"]) - time.time()
     state.utc_offset = int(payload.get("utc_offset", 0))
-    # Claude Code drops a window once it resets; keep the old one so the board shows 0% itself.
-    state.session = window_from(payload, "session") or state.session
-    state.week = window_from(payload, "week") or state.week
+    if "session" in payload or "week" in payload:
+        # Claude Code drops a window once it resets; keep the old one so the board shows 0% itself.
+        state.session = window_from(payload, "session") or state.session
+        state.week = window_from(payload, "week") or state.week
+        state.claude_updated = time.time()
+    copilot = payload.get("copilot")
+    if copilot:
+        state.month = (float(copilot["pct"]), int(copilot["resets_at"]))
+        state.month_length = int(copilot["resets_at"]) - int(copilot["starts_at"])
+        state.credits = (int(copilot["used"]), int(copilot["entitlement"]))
+        state.copilot_updated = time.time()
     state.changed.set()
 
 
@@ -362,20 +489,36 @@ async def watch_battery():
                 state.brightness = level
             if old is None or old.usb_connected != r.usb_connected:
                 state.changed.set()  # plugging in or unplugging shows at once
-        if state.screen == BATTERY_SCREEN and time.time() - state.last_touch >= BATTERY_SCREEN_IDLE:
-            show(USAGE_SCREEN)
         await asyncio.sleep(BATTERY_SECONDS)
 
 
-async def watch_touch():
+def on_press(point):
+    """A tap at point (x, y) on the touch screen, or a button press (point None)."""
+    if point is None:
+        show(BUTTON_CYCLE[(BUTTON_CYCLE.index(state.screen) + 1) % len(BUTTON_CYCLE)])
+    elif state.screen != SUMMARY_SCREEN:
+        show(SUMMARY_SCREEN)
+    else:
+        S = layout.summary
+        y = point[1]
+        if power and y < S.top_h:
+            show(BATTERY_SCREEN)
+        else:
+            show(CLAUDE_SCREEN if y < S.divider_y else COPILOT_SCREEN)
+
+
+async def watch_input():
     was_down = False
     while True:
-        down = touch.touched()
+        point = hw.touch.point() if hw.touch else None
+        down = point is not None if hw.touch else hw.button.pressed()
         if down and not was_down:
-            state.last_touch = time.time()
-            show(USAGE_SCREEN if state.screen == BATTERY_SCREEN else BATTERY_SCREEN)
+            state.last_input = time.time()
+            on_press(point)
         was_down = down
-        await asyncio.sleep_ms(TOUCH_MS)
+        if state.screen != SUMMARY_SCREEN and time.time() - state.last_input >= IDLE_SECONDS:
+            show(SUMMARY_SCREEN)
+        await asyncio.sleep_ms(INPUT_MS)
 
 
 async def redraw():
@@ -383,11 +526,7 @@ async def redraw():
         if state.screen_changed:
             state.screen_changed = False
             draw_static()
-        if state.screen == BATTERY_SCREEN:
-            if state.reading:
-                draw_battery_screen()
-        else:
-            draw()
+        draw()
         state.changed.clear()
         seconds = BATTERY_SECONDS if state.screen == BATTERY_SCREEN else REDRAW_SECONDS
         try:
@@ -401,8 +540,8 @@ async def main():
     asyncio.create_task(keep_wifi())
     if power:
         asyncio.create_task(watch_battery())
-    if touch:
-        asyncio.create_task(watch_touch())
+    if hw.touch or hw.button:
+        asyncio.create_task(watch_input())
     await asyncio.start_server(handle, "0.0.0.0", 80)
     await redraw()
 
