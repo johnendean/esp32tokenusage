@@ -89,7 +89,9 @@ class TextTest(unittest.TestCase):
     def test_battery_screen_lines_fit(self):
         # The S3 Battery screen fits 28 characters of the medium font on a line.
         on_battery = dict(ON_BATTERY)
-        lines = [battery.WORKING_OUT, "Full in about 10 h 55 min", "About 10 h 55 min left"]
+        # The slowest estimate shown is 3 points in 30 minutes.
+        longest = battery.duration_text(100 / (3 / battery.ESTIMATE_WINDOW))
+        lines = [battery.WORKING_OUT, "Full in about " + longest, "About %s left" % longest]
         lines += battery.warnings(reading(hot=True, usb_limited=True))
         for changes in (
             {},
@@ -163,9 +165,15 @@ class EstimatorTest(unittest.TestCase):
         # Slow at first (1 point per 10 min), then fast (1 point per minute).
         t = self.feed(e, [10, 11, 12, 13, 14, 15], 10 * MINUTE)
         self.feed(e, [16, 17, 18, 19, 20], MINUTE, start=t + MINUTE)
-        # At 55 min the window starts at 25 min, anchored by the 12 seen at 20 min:
-        # 8 points in 35 min, so 80 to go takes 350 min. All 55 min would give 10 h.
-        self.assertEqual(e.text(), "Full in about 5 h 50 min")
+        # At 55 min the window starts at 25 min, so the oldest sample kept is 13 at 30 min:
+        # 7 points in 25 min, so 80 to go takes about 286 min. All 55 min would give 10 h.
+        self.assertEqual(e.text(), "Full in about 4 h 45 min")
+
+    def test_ignores_a_baseline_older_than_the_window(self):
+        e = battery.Estimator()
+        e.update(reading(level=50), 0)
+        e.update(reading(level=53), 60 * MINUTE)  # gauge jumps after an hour standing still
+        self.assertEqual(e.text(), battery.WORKING_OUT)
 
 
 if __name__ == "__main__":

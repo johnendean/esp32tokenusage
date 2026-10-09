@@ -130,6 +130,8 @@ class Estimator:
 
     Only the moments the level changes are kept, over the last ESTIMATE_WINDOW
     seconds, and the history starts over whenever the Charging state changes.
+    Needing ESTIMATE_MIN_CHANGE points inside the window also caps the estimate:
+    3 points in 30 minutes at the slowest, so never more than about 16 h 40 min.
     """
 
     def __init__(self):
@@ -147,8 +149,8 @@ class Estimator:
             return
         if not self._samples or self._samples[-1][1] != r.level:
             self._samples.append((now, r.level))
-        # Keep one sample from before the window, so the window's start is anchored.
-        while len(self._samples) > 2 and now - self._samples[1][0] > ESTIMATE_WINDOW:
+        # Drop samples older than the window, but always keep the current level.
+        while len(self._samples) > 1 and now - self._samples[0][0] > ESTIMATE_WINDOW:
             self._samples.pop(0)
 
     def text(self):
