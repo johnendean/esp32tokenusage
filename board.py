@@ -76,7 +76,8 @@ def _s3_amoled():
     # miso must be given: the default MISO pin belongs to the octal PSRAM.
     spi = SPI(2, baudrate=40_000_000, polarity=0, phase=0, sck=Pin(11), mosi=Pin(4), miso=Pin(5))
     tft = co5300.CO5300(spi, Pin(12, Pin.OUT), i2c)
-    # 368x448 portrait: logo and Pace message at the top, Usage bars stacked below.
+    # 368x448 portrait: logo top left, Battery indicator top right, Pace message
+    # below them, Usage bars stacked under that.
     margin = 16
     bar_w = tft.width - 2 * margin
     return tft, Layout(
@@ -86,7 +87,7 @@ def _s3_amoled():
         message_lines=2,
         message_chars=bar_w // medium.WIDTH,
         divider_y=144,
-        logo_x=(tft.width - 48) // 2,
+        logo_x=margin,
         logo_y=24,
         column_x=margin,
         bar_w=bar_w,

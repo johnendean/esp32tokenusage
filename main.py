@@ -348,15 +348,20 @@ def show(screen):
 
 async def watch_battery():
     while True:
-        r = power.read()
-        old, state.reading = state.reading, r
-        state.estimator.update(r, time.time())
-        level = battery.brightness(r)
-        if level != state.brightness:
-            tft.brightness(level)
-            state.brightness = level
-        if old is None or old.usb_connected != r.usb_connected:
-            state.changed.set()  # plugging in or unplugging shows at once
+        try:
+            r = power.read()
+        except OSError as e:
+            print("battery read failed:", e)  # try again next time round
+            r = None
+        if r:
+            old, state.reading = state.reading, r
+            state.estimator.update(r, time.time())
+            level = battery.brightness(r)
+            if level != state.brightness:
+                tft.brightness(level)
+                state.brightness = level
+            if old is None or old.usb_connected != r.usb_connected:
+                state.changed.set()  # plugging in or unplugging shows at once
         if state.screen == BATTERY_SCREEN and time.time() - state.last_touch >= BATTERY_SCREEN_IDLE:
             show(USAGE_SCREEN)
         await asyncio.sleep(BATTERY_SECONDS)

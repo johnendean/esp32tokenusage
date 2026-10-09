@@ -23,7 +23,7 @@ DIM_BRIGHTNESS = 128  # half of the panel's 0-255 range
 FULL_BRIGHTNESS = 255
 
 LOW_BATTERY_WARNING = "Battery low, plug in"
-WORKING_OUT = "Working out time remaining..."
+WORKING_OUT = "Working out time left..."
 ESTIMATE_WINDOW = 30 * 60
 ESTIMATE_MIN_CHANGE = 3  # Charge level points moved before an estimate is shown
 
@@ -55,7 +55,7 @@ def charging_state(r):
         return "No battery fitted"
     if r.charging:
         if r.stage in (TRICKLE, PRECHARGE):
-            return "Charging slowly (battery very low)"
+            return "Charging slowly (very low)"
         return "Charging"
     if r.usb_connected:
         return "Charged" if r.stage == DONE else "Plugged in, not charging"
@@ -66,9 +66,9 @@ def warnings(r):
     """Plain-words problems worth showing, most important first."""
     out = []
     if r.hot and r.charging:
-        out.append("Charging slowed: board is hot")
+        out.append("Board hot, charging slowed")
     if r.usb_limited and r.usb_connected:
-        out.append("USB can't supply enough power")
+        out.append("USB power too weak")
     return out
 
 

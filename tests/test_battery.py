@@ -37,7 +37,7 @@ class ChargingStateTest(unittest.TestCase):
 
     def test_very_flat_battery_charges_slowly(self):
         for stage in (battery.TRICKLE, battery.PRECHARGE):
-            self.assertEqual(battery.charging_state(reading(stage=stage)), "Charging slowly (battery very low)")
+            self.assertEqual(battery.charging_state(reading(stage=stage)), "Charging slowly (very low)")
 
     def test_charged(self):
         self.assertEqual(battery.charging_state(reading(charging=False, stage=battery.DONE, level=100)), "Charged")
@@ -59,11 +59,11 @@ class WarningsTest(unittest.TestCase):
         self.assertEqual(battery.warnings(reading()), [])
 
     def test_hot_only_matters_while_charging(self):
-        self.assertEqual(battery.warnings(reading(hot=True)), ["Charging slowed: board is hot"])
+        self.assertEqual(battery.warnings(reading(hot=True)), ["Board hot, charging slowed"])
         self.assertEqual(battery.warnings(reading(hot=True, **ON_BATTERY)), [])
 
     def test_weak_usb(self):
-        self.assertEqual(battery.warnings(reading(usb_limited=True)), ["USB can't supply enough power"])
+        self.assertEqual(battery.warnings(reading(usb_limited=True)), ["USB power too weak"])
 
 
 class LowBatteryTest(unittest.TestCase):
@@ -86,6 +86,23 @@ class LowBatteryTest(unittest.TestCase):
 
 
 class TextTest(unittest.TestCase):
+    def test_battery_screen_lines_fit(self):
+        # The S3 Battery screen fits 28 characters of the medium font on a line.
+        on_battery = dict(ON_BATTERY)
+        lines = [battery.WORKING_OUT, "Full in about 10 h 55 min", "About 10 h 55 min left"]
+        lines += battery.warnings(reading(hot=True, usb_limited=True))
+        for changes in (
+            {},
+            dict(stage=battery.TRICKLE),
+            dict(charging=False, stage=battery.DONE),
+            dict(charging=False, stage=battery.STOPPED),
+            on_battery,
+            dict(battery_present=False, level=None),
+        ):
+            lines.append(battery.charging_state(reading(**changes)))
+        for line in lines:
+            self.assertLessEqual(len(line), 28, line)
+
     def test_readings_in_plain_units(self):
         self.assertEqual(battery.voltage_text(4199), "4.20 V")
         self.assertEqual(battery.usb_text(reading()), "Connected, 5.1 V")
