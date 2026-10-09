@@ -1,5 +1,6 @@
 """
-Detects which supported board this is and sets up its display.
+Detects which supported board this is and sets up its display, and on the S3
+its power chip and touch controller.
 
 The chip family tells the boards apart: the Waveshare ESP32-C6-LCD-1.47 and
 the Waveshare ESP32-S3-Touch-AMOLED-1.8.
@@ -61,11 +62,13 @@ def _c6_lcd():
         bar_h=8,
         reset_dy=32,
         reset_chars=(tft.width - column_x) // small.WIDTH,
-    )
+    ), None, None
 
 
 def _s3_amoled():
+    import axp2101
     import co5300
+    import cst816
     import spleen_12x24 as medium
     import vga2_16x32 as big
 
@@ -73,7 +76,8 @@ def _s3_amoled():
     # miso must be given: the default MISO pin belongs to the octal PSRAM.
     spi = SPI(2, baudrate=40_000_000, polarity=0, phase=0, sck=Pin(11), mosi=Pin(4), miso=Pin(5))
     tft = co5300.CO5300(spi, Pin(12, Pin.OUT), i2c)
-    # 368x448 portrait: logo and Pace message at the top, Usage bars stacked below.
+    # 368x448 portrait: logo top left, Battery indicator top right, Pace message
+    # below them, Usage bars stacked under that.
     margin = 16
     bar_w = tft.width - 2 * margin
     return tft, Layout(
@@ -83,7 +87,7 @@ def _s3_amoled():
         message_lines=2,
         message_chars=bar_w // medium.WIDTH,
         divider_y=144,
-        logo_x=(tft.width - 48) // 2,
+        logo_x=margin,
         logo_y=24,
         column_x=margin,
         bar_w=bar_w,
@@ -94,7 +98,11 @@ def _s3_amoled():
         bar_h=24,
         reset_dy=76,
         reset_chars=(bar_w - 10 * small.WIDTH) // small.WIDTH,
-    )
+        # Battery indicator, top right, level with the middle of the logo: its right edge.
+        battery_x=tft.width - margin,
+        battery_y=40,
+        battery_font=medium,
+    ), axp2101.AXP2101(i2c), cst816.CST816(i2c)
 
 
 def detect():
@@ -108,5 +116,6 @@ def detect():
 
 
 def setup():
-    """Return (display, Layout) for the board this is running on."""
+    """Return (display, Layout, power chip, touch controller) for the board this is
+    running on. Boards without a battery or touch screen give None for those."""
     return _s3_amoled() if detect() == "s3" else _c6_lcd()

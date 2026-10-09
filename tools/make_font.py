@@ -1,14 +1,16 @@
 """Convert assets/spleen-12x24.bdf into spleen_12x24.py for main.py's text().
 
 Glyphs are stored for framebuf.MONO_HLSB: each row is two bytes, leftmost
-pixel in the top bit, so a 12x24 glyph takes 48 bytes. Covers printable ASCII.
+pixel in the top bit, so a 12x24 glyph takes 48 bytes. Covers printable ASCII,
+plus the degree sign in the unused DEL slot (0x7F): main.py maps "\u00b0" there.
 """
 import os
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 SRC = os.path.join(ROOT, "assets", "spleen-12x24.bdf")
 OUT = os.path.join(ROOT, "spleen_12x24.py")
-FIRST, LAST = 0x20, 0x7F
+FIRST, LAST = 0x20, 0x80
+DEGREE_SLOT, DEGREE = 0x7F, 0xB0
 
 
 def parse(path):
@@ -52,7 +54,8 @@ def main():
     assert width <= 16, "two bytes per row"
     data = bytearray()
     for code in range(FIRST, LAST):
-        bbx, rows = glyphs.get(code, glyphs[ord("?")])
+        source = DEGREE if code == DEGREE_SLOT else code
+        bbx, rows = glyphs.get(source, glyphs[ord("?")])
         for row in cell(width, height, ascent, bbx, rows):
             data += row.to_bytes(2, "big")
     with open(OUT, "w") as f:
