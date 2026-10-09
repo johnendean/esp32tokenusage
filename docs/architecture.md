@@ -24,6 +24,9 @@ flowchart LR
         logic["usage.py<br/>reset text, Pace message"]
         lcd["Screen, picked by board.py<br/>C6: ST7789 LCD 320×172 landscape<br/>S3: CO5300 AMOLED 368×448 portrait"]
         wifi["Wi-Fi keeper"]
+        power["S3 only: power chip (axp2101.py)<br/>read every 2 s"]
+        touchc["S3 only: touch (cst816.py)<br/>polled every 50 ms"]
+        batt["battery.py<br/>Charging state, estimate, warnings"]
     end
 
     api -- "responses carry<br/>rate limit data" --> cc
@@ -39,11 +42,16 @@ flowchart LR
     loop --> logic
     loop --> lcd
     wifi -. "keeps the board<br/>on the network" .-> server
+    power --> batt
+    batt --> loop
+    touchc -- "tap switches<br/>Usage / Battery screen" --> loop
 ```
 
 `usage.py` runs on both machines: on the board to draw the screen, and on the Mac for the unit tests.
 
 The same code runs on the Waveshare ESP32-C6-LCD-1.47 and the ESP32-S3-Touch-AMOLED-1.8. At startup `board.py` reads the chip family, sets up that board's display and returns a layout for its screen; the board then announces itself as `<DEVICE_NAME>-c6.local` or `<DEVICE_NAME>-s3.local`. The Mac sends each update to every host in `DEVICE_HOSTS`, so a board that is switched off does not hold up the others.
+
+On the S3, which has a battery and a touch screen, the board also shows a **Battery indicator** in the top-right corner and a **Battery screen** that a tap opens and closes. The Battery screen goes back to the Usage screen after 30 seconds without a touch. `battery.py` turns the power chip's readings into plain words, so like `usage.py` it is unit-tested on the Mac.
 
 ## What happens on an update
 

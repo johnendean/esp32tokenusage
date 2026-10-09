@@ -23,3 +23,27 @@ _Avoid_: Renewal, refresh
 **Pace message**:
 A one-line verdict on whether current usage will outlast the window before its Reset time: On track, Cutting it close, or a projected limit time.
 _Avoid_: Status, forecast, "on track" message
+
+**Usage screen**:
+The main screen: the Pace message and the two Usage bars.
+_Avoid_: Home screen, main page
+
+**Battery screen**:
+A detail screen, on boards with a battery, showing the Charge level, Charging state and other readings in plain words. A tap toggles between it and the Usage screen; it also returns to the Usage screen by itself after a short idle time.
+_Avoid_: Battery page, power screen, status page
+
+**Battery indicator**:
+The small battery icon and Charge level in the top-right corner, with a lightning bolt while charging.
+_Avoid_: Battery icon, battery status
+
+**Charge level**:
+How full the battery is, as a percentage, taken from the power chip's own estimate rather than worked out from voltage.
+_Avoid_: Battery percentage, battery status, SoC
+
+**Charging state**:
+A plain-words phrase saying what the battery is doing, such as "Charging", "Charged", "On battery" or "Plugged in, not charging". It's never shown as a code or number.
+_Avoid_: Battery status, charge status
+
+**Low battery warning**:
+The red "Battery low, plug in" line that replaces the Pace message when the Charge level is 5% or below and USB isn't connected. From 10% down, on battery, the screen also dims to half brightness, returning to full as soon as USB is connected.
+_Avoid_: Battery alert, low power message
