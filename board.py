@@ -1,6 +1,6 @@
 """
-Detects which supported board this is and sets up its display, and on the S3
-its power chip and touch controller.
+Detects which supported board this is and sets up its display and controls:
+the BOOT button on the C6, the touch screen and power chip on the S3.
 
 The chip family tells the boards apart: the Waveshare ESP32-C6-LCD-1.47 and
 the Waveshare ESP32-S3-Touch-AMOLED-1.8.
@@ -19,6 +19,28 @@ class Layout:
     def __init__(self, **kwargs):
         for name, value in kwargs.items():
             setattr(self, name, value)
+
+
+class Board:
+    """What setup() found: display, Layout, and the parts only some boards have
+    (power chip, touch controller, button), None where missing."""
+
+    def __init__(self, tft, layout, power=None, touch=None, button=None):
+        self.tft = tft
+        self.layout = layout
+        self.power = power
+        self.touch = touch
+        self.button = button
+
+
+class Button:
+    """A push button wired to pull its pin low when pressed."""
+
+    def __init__(self, pin):
+        self.pin = Pin(pin, Pin.IN, Pin.PULL_UP)
+
+    def pressed(self):
+        return self.pin.value() == 0
 
 
 def _c6_lcd():
@@ -44,7 +66,8 @@ def _c6_lcd():
     )
     # 320x172: Pace message across the top, logo left, two Usage bar rows right.
     column_x = 60
-    return tft, Layout(
+    bar_w = tft.width - column_x - 8
+    layout = Layout(
         message_x=4,
         message_y=4,
         message_font=small,
@@ -54,7 +77,7 @@ def _c6_lcd():
         logo_x=4,
         logo_y=74,
         column_x=column_x,
-        bar_w=tft.width - column_x - 8,
+        bar_w=bar_w,
         row_ys=(42, 106),
         label_font=small,
         pct_dy=0,  # "N% used" sits on the label line
@@ -62,7 +85,33 @@ def _c6_lcd():
         bar_h=8,
         reset_dy=32,
         reset_chars=(tft.width - column_x) // small.WIDTH,
-    ), None, None
+        credits_y=106,  # Copilot screen: where the second Usage bar would be
+        credits_font=small,
+        updated_y=156,
+        # Summary screen: one row per Agent, logo left, text and bar right.
+        summary=Layout(
+            ys=(12, 96),
+            divider_y=86,
+            title_y=None,
+            warning_y=None,
+            logo_x=4,
+            name_x=column_x,
+            name_font=small,
+            pct_dy=0,
+            pct_font=small,
+            label_x=column_x,
+            label_dy=32,
+            label_font=small,
+            bar_x=column_x,
+            bar_w=bar_w,
+            bar_dy=20,
+            bar_h=8,
+            verdict_x=column_x,
+            verdict_dy=48,
+            verdict_font=small,
+        ),
+    )
+    return Board(tft, layout, button=Button(9))  # BOOT: also selects download mode if held at reset
 
 
 def _s3_amoled():
@@ -80,7 +129,7 @@ def _s3_amoled():
     # below them, Usage bars stacked under that.
     margin = 16
     bar_w = tft.width - 2 * margin
-    return tft, Layout(
+    layout = Layout(
         message_x=margin,
         message_y=84,
         message_font=medium,
@@ -102,7 +151,34 @@ def _s3_amoled():
         battery_x=tft.width - margin,
         battery_y=40,
         battery_font=medium,
-    ), axp2101.AXP2101(i2c), cst816.CST816(i2c)
+        credits_y=286,  # Copilot screen: under its only Usage bar
+        credits_font=medium,
+        updated_y=428,
+        # Summary screen: title and Battery indicator on top, then one row per Agent.
+        summary=Layout(
+            ys=(112, 280),
+            divider_y=260,
+            title_y=24,
+            warning_y=76,
+            top_h=100,  # a tap above this opens the Battery screen
+            logo_x=margin,
+            name_x=80,
+            name_font=big,
+            pct_dy=4,
+            pct_font=medium,
+            label_x=80,
+            label_dy=36,
+            label_font=medium,
+            bar_x=margin,
+            bar_w=bar_w,
+            bar_dy=72,
+            bar_h=24,
+            verdict_x=margin,
+            verdict_dy=104,
+            verdict_font=medium,
+        ),
+    )
+    return Board(tft, layout, power=axp2101.AXP2101(i2c), touch=cst816.CST816(i2c))
 
 
 def detect():
@@ -116,6 +192,5 @@ def detect():
 
 
 def setup():
-    """Return (display, Layout, power chip, touch controller) for the board this is
-    running on. Boards without a battery or touch screen give None for those."""
+    """Return the Board this is running on."""
     return _s3_amoled() if detect() == "s3" else _c6_lcd()

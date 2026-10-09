@@ -31,6 +31,11 @@ def window(rate_limits, key):
     return {"pct": w["used_percentage"], "resets_at": int(w["resets_at"])}
 
 
+def utc_offset():
+    """The Mac's current offset from UTC in seconds, so the board can show local times."""
+    return int(datetime.now().astimezone().utcoffset().total_seconds())
+
+
 def build_payload(status):
     rate_limits = status.get("rate_limits") or {}
     session, week = window(rate_limits, "five_hour"), window(rate_limits, "seven_day")
@@ -38,7 +43,7 @@ def build_payload(status):
         return None
     return {
         "now": int(time.time()),
-        "utc_offset": int(datetime.now().astimezone().utcoffset().total_seconds()),
+        "utc_offset": utc_offset(),
         "session": session,
         "week": week,
     }
@@ -72,8 +77,11 @@ def post(host, body, token):
     urllib.request.urlopen(req, timeout=5).close()
 
 
-def send(payload):
-    """Send to every board at once, so an offline one does not hold up the rest."""
+def send_to_boards(payload):
+    """Send to every board at once, so an offline one does not hold up the rest.
+
+    Returns (hosts, errors), one error string per board that could not be reached.
+    """
     cfg = settings()
     hosts = device_hosts(cfg)
     if not hosts:
@@ -92,6 +100,11 @@ def send(payload):
         t.start()
     for t in threads:
         t.join()
+    return hosts, errors
+
+
+def send(payload):
+    hosts, errors = send_to_boards(payload)
     if len(errors) < len(hosts):
         with open(CACHE, "w") as f:
             json.dump({"key": [payload["session"], payload["week"], payload["utc_offset"]], "sent": payload["now"]}, f)

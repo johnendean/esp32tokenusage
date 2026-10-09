@@ -88,6 +88,89 @@ class PaceTest(unittest.TestCase):
             self.assertLessEqual(len(text), 39, text)
 
 
+SEP_1 = int(datetime(2026, 9, 1, tzinfo=timezone.utc).timestamp())
+OCT_1 = int(datetime(2026, 10, 1, tzinfo=timezone.utc).timestamp())
+SEPTEMBER = OCT_1 - SEP_1  # NOW is 16.5 days in, 55% of the month
+
+
+class MonthTest(unittest.TestCase):
+    def test_reset_shows_the_date(self):
+        self.assertEqual(usage.month_reset_text((40, OCT_1), NOW, BST), "Resets Thu 1 Oct")
+        self.assertEqual(usage.month_reset_text((40, OCT_1), OCT_1, 0), "")
+
+    def test_on_track_names_the_reset_date(self):
+        # 40% at 55% of the month projects to 73%.
+        self.assertEqual(
+            usage.month_pace_message((40, OCT_1), SEPTEMBER, NOW, 0), ("On track for 1 Oct reset", usage.ON_TRACK)
+        )
+
+    def test_cutting_it_close(self):
+        self.assertEqual(
+            usage.month_pace_message((50, OCT_1), SEPTEMBER, NOW, 0),
+            ("Cutting it close for 1 Oct reset", usage.CLOSE),
+        )
+
+    def test_limit_more_than_a_week_away_shows_the_date(self):
+        # 66% in 16.5 days: the last 34% takes 8.5 more days, to 26 Sep 00:00.
+        self.assertEqual(usage.month_pace_message((66, OCT_1), SEPTEMBER, NOW, 0), ("Limit ~26 Sep", usage.LIMIT))
+
+    def test_limit_reached(self):
+        self.assertEqual(usage.month_pace_message((100, OCT_1), SEPTEMBER, NOW, 0), ("Limit reached", usage.LIMIT))
+
+    def test_waits_for_15_percent_of_the_month(self):
+        self.assertIsNone(usage.month_pace_message((10, OCT_1), SEPTEMBER, SEP_1 + 4 * DAY, 0))
+
+
+class SummaryTest(unittest.TestCase):
+    def claude(self, session, week):
+        return [
+            ("Current session", session, usage.SESSION_WINDOW, usage.SESSION_MIN_ELAPSED),
+            ("This week", week, usage.WEEK_WINDOW, usage.WEEK_MIN_ELAPSED),
+        ]
+
+    def session(self, pct, hours_elapsed):
+        return (pct, NOW + usage.SESSION_WINDOW - hours_elapsed * HOUR)
+
+    def week(self, pct, days_elapsed):
+        return (pct, NOW + usage.WEEK_WINDOW - days_elapsed * DAY)
+
+    def test_worse_verdict_wins(self):
+        row = usage.summary(self.claude(self.session(70, 2), self.week(20, 4)), NOW, 0)
+        self.assertEqual(row, ("Current session", 70, "Limit ~12:51 PM", usage.LIMIT))
+
+    def test_close_beats_on_track(self):
+        # Week 45% after 3.5 days projects to 90%; session 10% after 3h is on track.
+        row = usage.summary(self.claude(self.session(10, 3), self.week(45, 3.5)), NOW, 0)
+        self.assertEqual(row, ("This week", 45, "Close", usage.CLOSE))
+
+    def test_equal_verdicts_pick_the_higher_percentage(self):
+        row = usage.summary(self.claude(self.session(30, 3), self.week(25, 4)), NOW, 0)
+        self.assertEqual(row, ("Current session", 30, "On track", usage.ON_TRACK))
+
+    def test_too_early_to_judge_shows_no_verdict(self):
+        row = usage.summary(self.claude(self.session(5, 0.5), self.week(3, 0.5)), NOW, 0)
+        self.assertEqual(row, ("Current session", 5, "", None))
+
+    def test_judged_beats_unjudged(self):
+        row = usage.summary(self.claude(self.session(50, 0.5), self.week(20, 4)), NOW, 0)
+        self.assertEqual(row[0], "This week")
+
+    def test_no_data(self):
+        self.assertIsNone(usage.summary(self.claude(None, None), NOW, 0))
+
+    def test_month(self):
+        row = usage.summary([("This month", (66, OCT_1), SEPTEMBER, usage.MONTH_MIN_ELAPSED)], NOW, 0)
+        self.assertEqual(row, ("This month", 66, "Limit ~26 Sep", usage.LIMIT))
+
+
+class AgoTest(unittest.TestCase):
+    def test_ages(self):
+        self.assertEqual(usage.ago_text(30), "Updated just now")
+        self.assertEqual(usage.ago_text(12 * 60 + 5), "Updated 12 min ago")
+        self.assertEqual(usage.ago_text(3 * HOUR + 59 * 60), "Updated 3 h ago")
+        self.assertEqual(usage.ago_text(3 * DAY), "Updated 3 days ago")
+
+
 class WrapLinesTest(unittest.TestCase):
     def test_short_text_fills_first_line(self):
         self.assertEqual(usage.wrap_lines("On track", 28, 2), ["On track", ""])
