@@ -2,7 +2,7 @@
 
 The display shows each **Agent**'s usage (see [CONTEXT.md](../CONTEXT.md)): Claude's **Current session** and **This week**, and Copilot's **This month**. The board never fetches anything; the Mac pushes numbers to it over Wi-Fi. Between updates, the board uses its own clock to keep the screen current.
 
-- **Claude:** Claude Code decides when to send. Each time it runs the status line, the Mac pushes the latest numbers. [ADR 0001](adr/0001-usage-from-status-line-pushed-over-wifi.md) explains why.
+- **Claude:** Claude Code decides when to send. Each time it runs the status line, the Mac pushes the latest numbers. [ADR 0001](adr/0001-usage-from-status-line-pushed-over-wifi.md) explains why. Usage on other devices only shows once Claude Code next runs here; [a parked idea](ideas/claude-usage-background-job.md) covers polling for it.
 - **Copilot:** a launchd job on the Mac fetches This month from GitHub every 5 minutes and pushes it. [ADR 0002](adr/0002-copilot-usage-polled-by-a-mac-background-job.md) explains why this one needs a background job.
 
 ## Components
